@@ -2,6 +2,8 @@
 #include <locale.h>
 #include <string.h>
 
+#include "net.h"
+
 #define NOB_IMPLEMENTATION
 #include "../nob.h"
 
