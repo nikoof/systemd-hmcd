@@ -7,6 +7,7 @@ const char *src[] = {"src/main.c"};
 
 int main(int argc, char **argv) {
   NOB_GO_REBUILD_URSELF(argc, argv);
+  NOB_UNUSED(nob_shift(argv, argc));
 
   if (!nob_mkdir_if_not_exists(BUILD_DIR)) return 1;
 
@@ -18,6 +19,11 @@ int main(int argc, char **argv) {
   nob_da_append_many(&cmd, src, NOB_ARRAY_LEN(src));
 
   if (!nob_cmd_run(&cmd)) return 1;
+
+  if (strcmp("run", nob_shift(argv, argc)) == 0) {
+    nob_cmd_append(&cmd, BUILD_DIR OUT_NAME);
+    if (!nob_cmd_run(&cmd)) return 1;
+  }
 
   return 0;
 }
