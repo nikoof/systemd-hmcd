@@ -12,6 +12,8 @@ int main(int argc, char **argv) {
 
   Nob_Cmd cmd = {0};
   nob_cc(&cmd);
+  nob_cmd_append(&cmd, "-ggdb3", "-Og");
+  nob_cmd_append(&cmd, "-lgpgme");
   nob_cmd_append(&cmd, "-o", BUILD_DIR OUT_NAME);
   nob_da_append_many(&cmd, src, NOB_ARRAY_LEN(src));
 
