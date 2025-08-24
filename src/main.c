@@ -14,7 +14,7 @@
 #include "flag.h"
 
 void usage(FILE *stream) {
-  fprintf(stream, "./systemd-hmcd [OPTIONS]\n");
+  fprintf(stream, "usage: ./systemd-hmcd [OPTIONS]\n");
   fprintf(stream, "OPTIONS:\n");
   flag_print_options(stream);
 }
@@ -22,8 +22,11 @@ void usage(FILE *stream) {
 int main(int argc, char **argv) {
   bool *help = flag_bool("help", false, "Print this message and exit.");
   bool *listen = flag_bool("listen", false, "Listen or connect.");
-  char **key_fpr = flag_str("recipient", NULL, "GPG fingerprint of recipient key.");
+  char **recipient = flag_str("recipient", NULL, "GPG fingerprint of recipient key.");
   uint64_t *port = flag_uint64("port", 6969, "Port to listen on.");
+
+  char **input = flag_str("input", NULL, "Input file. If unspecified, read from stdin.");
+  char **output = flag_str("output", NULL, "Output file. If unspecified, print to stdout.");
 
   if (!flag_parse(argc, argv)) {
     usage(stderr);
@@ -36,18 +39,45 @@ int main(int argc, char **argv) {
     exit(EXIT_SUCCESS);
   }
 
-  const char *in = "Hallo, Leute!\n";
-  char out1[1024] = {0}, out2[1024] = {0};
+  if (!(*recipient) && !(*listen)) {
+    usage(stderr);
+    nob_log(NOB_ERROR, "Missing required parameter `-recipient`");
+    exit(EXIT_FAILURE);
+  }
 
   hmc_crypt_init();
-  hmc_crypt_encrypt("FE9CEE73394A8F43A239F91394B9F744D3E82C46", in, strlen(in) - 1, out1, 1024);
-  printf("%s\n", out1);
 
-  hmc_crypt_decrypt(out1, strlen(out1) - 1, out2, 1024);
-  printf("%s\n", out2);
+  FILE *input_file  = (*input == NULL)  ? stdin  : fopen(*input, "r");
+  FILE *output_file = (*output == NULL) ? stdout : fopen(*output, "w");
+
+  Nob_String_Builder sb = {0};
+  char out[1024] = {0};
+  if (!(*listen)) {
+    if (*input == NULL) {
+      char buf[1 << 16] = {0};
+      size_t count;
+      while (!(count = fread(buf, 1, 1 << 16, input_file))) {
+        nob_sb_append_buf(&sb, buf, count);
+      }
+      hmc_crypt_encrypt(*recipient, sb.items, sb.count, out, 1024);
+      fprintf(output_file, "%s\n", out);
+    } else {
+      nob_log(NOB_INFO, "Reading from %s", *input);
+      if (!nob_read_entire_file(*input, &sb)) exit(EXIT_FAILURE);
+      hmc_crypt_encrypt(*recipient, sb.items, sb.count, out, 1024);
+      fprintf(output_file, "%s\n", out);
+    }
+  } else {
+    if (*input != NULL) {
+      if (!nob_read_entire_file(*input, &sb)) exit(EXIT_FAILURE);
+    }
+    hmc_crypt_decrypt(sb.items, sb.count, out, 1024);
+    fprintf(output_file, "%s\n", out);
+  }
+
 
   printf("listen: %d\n", *listen);
-  printf("key_fpr: %s\n", *key_fpr);
+  printf("key_fpr: %s\n", *recipient);
   printf("port: %zu\n", *port);
 
   return 0;
