@@ -1,7 +1,7 @@
 #define NOB_IMPLEMENTATION
 #include "nob.h"
 
-const char *src[] = {"src/main.c"};
+const char *src[] = {"src/main.c", "src/crypt.c"};
 #define BUILD_DIR "build/"
 #define OUT_NAME "systemd-hmcd"
 
@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
 
   if (!nob_cmd_run(&cmd)) return 1;
 
-  if (strcmp("run", nob_shift(argv, argc)) == 0) {
+  if (argc > 0 && strcmp("run", nob_shift(argv, argc)) == 0) {
     nob_cmd_append(&cmd, BUILD_DIR OUT_NAME);
     if (!nob_cmd_run(&cmd)) return 1;
   }
