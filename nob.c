@@ -1,11 +1,7 @@
 #define NOB_IMPLEMENTATION
 #include "nob.h"
 
-<<<<<<< HEAD
-const char *src[] = {"src/main.c", "src/crypt.c"};
-=======
-const char *src[] = { "src/main.c", "src/net.c" };
->>>>>>> 371d2ae (Added support for listen connect)
+const char *src[] = {"src/main.c", "src/net.c", "src/crypt.c"};
 #define BUILD_DIR "build/"
 #define OUT_NAME "systemd-hmcd"
 

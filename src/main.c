@@ -20,12 +20,6 @@ void usage(FILE *stream) {
 }
 
 int main(int argc, char **argv) {
-  if (argc == 1) {
-    hmc_net_serve(4040);
-  } else {
-    hmc_net_connect("127.0.0.1", 4040);
-  }
-  return 0;
   bool *help = flag_bool("help", false, "Print this message and exit.");
   bool *listen = flag_bool("listen", false, "Listen or connect.");
   char **recipient = flag_str("recipient", NULL, "GPG fingerprint of recipient key.");
