@@ -20,7 +20,7 @@ void hmc_crypt_init() {
   gpgme_set_armor(hmc_crypt_ctx, 1);
 }
 
-void hmc_crypt_encrypt(const char *recp, const char *in, size_t in_sz, char *out, size_t out_sz) {
+size_t hmc_crypt_encrypt(const char *recp, const char *in, size_t in_sz, char *out, size_t out_sz) {
   gpgme_key_t recp_key[2] = {0};
   GERR(gpgme_get_key(hmc_crypt_ctx, recp, &recp_key[0], 0), "Failed to get key with fingerprint %s", recp);
 
@@ -35,7 +35,8 @@ void hmc_crypt_encrypt(const char *recp, const char *in, size_t in_sz, char *out
   }
 
   assert(gpgme_data_seek(data_out, 0, SEEK_SET) == 0);
-  size_t _ = gpgme_data_read(data_out, out, out_sz);
+  size_t cryptlen = gpgme_data_read(data_out, out, out_sz);
+  return cryptlen;
 }
 
 void hmc_crypt_decrypt(const char *in, size_t in_sz, char *out, size_t out_sz) {

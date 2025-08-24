@@ -22,6 +22,7 @@ void usage(FILE *stream) {
 int main(int argc, char **argv) {
   bool *help = flag_bool("help", false, "Print this message and exit.");
   bool *listen = flag_bool("listen", false, "Listen or connect.");
+  char **targetip = flag_str("targetip", NULL, "Peer ip to connect to.");
   char **recipient = flag_str("recipient", NULL, "GPG fingerprint of recipient key.");
   uint64_t *port = flag_uint64("port", 6969, "Port to listen on.");
 
@@ -79,6 +80,36 @@ int main(int argc, char **argv) {
   printf("listen: %d\n", *listen);
   printf("key_fpr: %s\n", *recipient);
   printf("port: %zu\n", *port);
+
+  if (*listen) {
+    struct hmc_net_socket_serve e;
+    hmc_net_serve(&e, *port);
+    hmc_net_read_handshake(&e);
+    fprintf(stdout, "Handshake finalized! datalen %u msglen %u\n", e.datalen, e.msglen);
+    /*
+    for(uint32_t i = 0; i < 20; ++i) {
+      hmc_net_read(&e)
+    }
+    */
+    hmc_net_close_read(&e);
+    fprintf(stdout, "Peer closed connection!\n");
+  } else {
+    if (*recipient == NULL || **recipient == '\0') {
+      nob_log(NOB_ERROR, "Cannot connect to remote if encryption recipient is unknown!");
+      usage(stderr);
+      exit(EXIT_FAILURE);
+    }
+    if (*targetip == NULL || **targetip == '\0') {
+      nob_log(NOB_ERROR, "Cannot connect to remote if target ip is unknown!");
+      usage(stderr);
+      exit(EXIT_FAILURE);
+    }
+    struct hmc_net_socket_connect e;
+    hmc_net_connect(&e, *targetip, *port);
+    hmc_net_send_handshake(&e, *recipient, 200, 200);
+    hmc_net_close_connect(&e);
+    fprintf(stdout, "Done!\n");
+  }
 
   return 0;
 }
