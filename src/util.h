@@ -2,7 +2,7 @@
 #define UTIL_H
 
 #include "../nob.h"
-#define _EE(op, targ, cmd, res, args...) {if ((cmd) op (targ)) { nob_log(NOB_ERROR, "systemd_hmcd: " res "\n", ##args); return 1; } }
+#define _EE(op, targ, cmd, res, args...) {if ((cmd) op (targ)) { nob_log(NOB_ERROR, "systemd_hmcd: " res "\n", ##args); exit(EXIT_FAILURE); } }
 #define EZERO(cmd, res, args...) _EE(==,    0, cmd, res, ##args)
 #define ENULL(cmd, res, args...) _EE(==, NULL, cmd, res, ##args)
 #define  ENEZ(cmd, res, args...) _EE(!=,    0, cmd, res, ##args)

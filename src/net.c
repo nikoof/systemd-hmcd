@@ -14,7 +14,7 @@
 
 static uint32_t get_big_size(uint32_t ss) { return ss * 4 + 60; }
 
-uint8_t hmc_net_serve(struct hmc_net_socket_serve *__restrict e, uint16_t port) {
+void hmc_net_serve(struct hmc_net_socket_serve *__restrict e, uint16_t port) {
   /// TODO: Support ipv6
   ENEG((e->fd = socket(AF_INET, SOCK_STREAM, 0)), "Could not create listening socket! %m");
 
@@ -33,46 +33,40 @@ uint8_t hmc_net_serve(struct hmc_net_socket_serve *__restrict e, uint16_t port) 
   socklen_t addrl = sizeof(addr);
   ENEG((e->remote_fd = accept(e->fd, (struct sockaddr*)&addr, &addrl)), "Could not accept connection from remote! %m");
   nob_log(NOB_INFO, "systemd_hmcd: Got connection from %u", e->remote_fd);
-
-  return 0;
 }
 
-uint8_t hmc_net_read(struct hmc_net_socket_serve *__restrict e) {
-  ENEG((e->readl = read(e->remote_fd, e->data, 2)), "Could not read from remote socket! %m");
-  uint32_t curmsglen = (uint32_t)((uint8_t)(e->data[0]) << 8) | (uint32_t)((uint8_t)e->data[1]);
-  ENEG((e->readl = read(e->remote_fd, e->data, curmsglen)), "Could not read from remote socket! %m");
-  if (e->readl == 0) { return 0; }
-  e->readl = hmc_crypt_decrypt(e->data, e->readl, e->plaintext, e->msglen);
-  return 0;
+size_t hmc_net_read(struct hmc_net_socket_serve *__restrict e) {
+  size_t readl;
+  ENEG((readl = read(e->remote_fd, e->cipher, 2)), "Could not read from remote socket! %m");
+  if (readl != 2) { return 0; }
+  uint32_t curmsglen = (uint32_t)((uint8_t)(e->cipher[0]) << 8) | (uint32_t)((uint8_t)e->cipher[1]); /// =
+  ENEG((readl = read(e->remote_fd, e->cipher, curmsglen)), "Could not read from remote socket! %m");
+  if (readl == 0) { return 0; }
+  return hmc_crypt_decrypt(e->cipher, readl, e->plaintext, HMC_NET_MESSAGE_LEN);
 }
 
-uint8_t hmc_net_read_handshake(struct hmc_net_socket_serve *__restrict e) {
-  char data[1024]; e->data = data;
-  uint8_t plaintext[1024]; e->plaintext = plaintext;
-  e->msglen = 512;
-  ENEG(hmc_net_read(e), "Could not complete read!");
+void hmc_net_read_handshake(struct hmc_net_socket_serve *__restrict e) {
+  char cipher[1024]; e->cipher = cipher;
+  char plaintext[1024]; e->plaintext = plaintext;
+  hmc_net_read(e);
 
   ENEZ(((plaintext[0] != 0x69) || (plaintext[1] != 0x69)), "Handshake did not contain the correct signature");
 #define US(pos, shift) (((uint64_t)((uint8_t)plaintext[pos]))<<(shift))
   e->datalen = US(2, 24) | US(3, 16) | US(4, 8) | US(5, 0);
-  e->msglen  = US(6, 24) | US(7, 16) | US(8, 8) | US(9, 0);
-  ENEZ((e->msglen > HMC_NET_MAX_MSG_LEN), "Peer is trying to send messages bigger than the max package len, aborting! %u > %u", e->msglen, HMC_NET_MAX_MSG_LEN);
 #undef US
 
-  ENULL((e->data = malloc(get_big_size(e->msglen))), "Could not allocate buffer of size %u for reading data!", get_big_size(e->msglen));
-  ENULL((e->plaintext = malloc(e->msglen + 20)), "Could not allocate buffer of size %u for plaintext data!", e->msglen + 20);
-  return 0;
+  ENULL((e->cipher = malloc(get_big_size(HMC_NET_MESSAGE_LEN))), "Could not allocate buffer of size %u for reading data!", get_big_size(HMC_NET_MESSAGE_LEN));
+  ENULL((e->plaintext = malloc(HMC_NET_MESSAGE_LEN + 20)), "Could not allocate buffer of size %u for plaintext data!", HMC_NET_MESSAGE_LEN + 20);
 }
 
-uint8_t hmc_net_close_read(struct hmc_net_socket_serve *__restrict e) {
-  free(e->data);
+void hmc_net_close_read(struct hmc_net_socket_serve *__restrict e) {
+  free(e->cipher);
   free(e->plaintext);
   ENEG(close(e->fd), "Could not close local fd! %m");
   ENEG(close(e->remote_fd), "Could not close remote fd! %m");
-  return 0;
 }
 
-uint8_t hmc_net_connect(struct hmc_net_socket_connect *__restrict e, char *ip, uint16_t port) {
+void hmc_net_connect(struct hmc_net_socket_connect *__restrict e, char *ip, uint16_t port) {
   /// TODO: Support ipv6 with AF_INET6
   ENEG((e->fd = socket(AF_INET, SOCK_STREAM, 0)), "Could not create connecting socket! %m");
   struct sockaddr_in serv_addr;
@@ -83,20 +77,16 @@ uint8_t hmc_net_connect(struct hmc_net_socket_connect *__restrict e, char *ip, u
   ENEG(inet_pton(AF_INET, ip, &serv_addr.sin_addr) - 1, "Address %s invalid or not supported! %m", ip);
   ENEG(connect(e->fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)), "Could not connect to %s:%hu! %m", ip, port);
   nob_log(NOB_INFO, "Connected to remote %s:%hu!", ip, port);
-  
-
-  return 0;
 }
 
-uint8_t hmc_net_send(struct hmc_net_socket_connect *__restrict e, char *__restrict buf, size_t len) {
-  size_t mlen = hmc_crypt_encrypt(e->recipient, buf, len, e->cipher, get_big_size(e->msglen));
+void hmc_net_send(struct hmc_net_socket_connect *__restrict e, char *__restrict buf, size_t len) {
+  size_t mlen = hmc_crypt_encrypt(e->recipient, buf, len, e->cipher, get_big_size(HMC_NET_MESSAGE_LEN));
   uint8_t mlenbuf[2] = {0}; mlenbuf[0] = ((mlen & 0xFF00) >> 8); mlenbuf[1] = (mlen & 0xFF);
   ENEG(send(e->fd, mlenbuf, 2, 0), "Could not send to remote server! %m");
   ENEG(send(e->fd, e->cipher, mlen, 0), "Could not send to remote server! %m");
-  return 0;
 }
 
-uint8_t hmc_net_send_handshake(struct hmc_net_socket_connect *__restrict e, const char *recipient) {
+void hmc_net_send_handshake(struct hmc_net_socket_connect *__restrict e, const char *recipient) {
   char buf[512] = {0};
   buf[0] = 0x69;
   buf[1] = 0x69;
@@ -105,17 +95,17 @@ uint8_t hmc_net_send_handshake(struct hmc_net_socket_connect *__restrict e, cons
   buf[3] = SU(e->datalen, 16);
   buf[4] = SU(e->datalen,  8);
   buf[5] = SU(e->datalen,  0);
-  buf[6] = SU(e-> msglen, 24);
-  buf[7] = SU(e-> msglen, 16);
-  buf[8] = SU(e-> msglen,  8);
-  buf[9] = SU(e-> msglen,  0);
+  buf[6] = SU(HMC_NET_MESSAGE_LEN, 24);
+  buf[7] = SU(HMC_NET_MESSAGE_LEN, 16);
+  buf[8] = SU(HMC_NET_MESSAGE_LEN,  8);
+  buf[9] = SU(HMC_NET_MESSAGE_LEN,  0);
 #undef SU
-  e->cipher = malloc(get_big_size(e->msglen));
+  e->cipher = malloc(get_big_size(HMC_NET_MESSAGE_LEN));
   e->recipient = recipient;
   hmc_net_send(e, buf, 10);
 }
 
-uint8_t hmc_net_close_connect(struct hmc_net_socket_connect *__restrict e) {
+void hmc_net_close_connect(struct hmc_net_socket_connect *__restrict e) {
   free(e->cipher);
   ENEG(close(e->fd), "Could not close local fd! %m");
 }
