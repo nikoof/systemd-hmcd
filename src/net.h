@@ -3,19 +3,21 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include "crypt.h"
 
 #define HMC_NET_MESSAGE_LEN 4096
 
 struct hmc_net_socket_serve {
   int32_t fd, remote_fd;
   uint32_t datalen;
-  char *cipher; char *plaintext; 
+  Hmc_String_Builder cipher_sb;
+  Hmc_String_Builder plaintext_sb;
 };
 
 struct hmc_net_socket_connect {
   int32_t fd;
   uint32_t msglen, datalen;
-  char *cipher;
+  Hmc_String_Builder cipher_sb;
   const char *recipient;
 };
 
