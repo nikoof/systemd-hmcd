@@ -74,7 +74,7 @@ void hmc_net_connect(struct hmc_net_socket_connect *__restrict e, char *ip, uint
   serv_addr.sin_port = htons(port);
 
   /// TODO: Support ipv6 with AF_INET6
-  ENEG(inet_pton(AF_INET, ip, &serv_addr.sin_addr) - 1, "Address %s invalid or not supported! %m", ip);
+  ENEG(inet_pton(AF_INET, ip, &serv_addr.sin_addr) - 1, "Could not parse address %s! %s", ip, (errno == EAFNOSUPPORT) ? strerror(errno) : "Invalid address");
   ENEG(connect(e->fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)), "Could not connect to %s:%hu! %m", ip, port);
   nob_log(NOB_INFO, "Connected to remote %s:%hu!", ip, port);
 }
@@ -87,9 +87,8 @@ void hmc_net_send(struct hmc_net_socket_connect *__restrict e, char *__restrict 
 }
 
 void hmc_net_send_handshake(struct hmc_net_socket_connect *__restrict e, const char *recipient) {
-  char buf[512] = {0};
-  buf[0] = 0x69;
-  buf[1] = 0x69;
+  char buf[10] = {0};
+  buf[0] = 0x69; buf[1] = 0x69;
 #define SU(data,shift) (((data)>>(shift))&0xFF)
   buf[2] = SU(e->datalen, 24);
   buf[3] = SU(e->datalen, 16);

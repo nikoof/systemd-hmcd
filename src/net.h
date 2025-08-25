@@ -7,16 +7,14 @@
 #define HMC_NET_MESSAGE_LEN 4096
 
 struct hmc_net_socket_serve {
-  int32_t fd;
-  int32_t remote_fd;
+  int32_t fd, remote_fd;
   uint32_t datalen;
   char *cipher; char *plaintext; 
 };
 
 struct hmc_net_socket_connect {
   int32_t fd;
-  uint32_t msglen;
-  uint32_t datalen;
+  uint32_t msglen, datalen;
   char *cipher;
   const char *recipient;
 };
