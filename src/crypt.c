@@ -39,7 +39,7 @@ size_t hmc_crypt_encrypt(const char *recp, const char *in, size_t in_sz, char *o
   return cryptlen;
 }
 
-void hmc_crypt_decrypt(const char *in, size_t in_sz, char *out, size_t out_sz) {
+size_t hmc_crypt_decrypt(const char *in, size_t in_sz, char *out, size_t out_sz) {
   gpgme_data_t data_in = {0}, data_out = {0};
   GERR(gpgme_data_new_from_mem(&data_in, in, in_sz, 1), "Failed to create GPGME data object");
   GERR(gpgme_data_new(&data_out), "Failed to create GPGME data object");
@@ -47,5 +47,6 @@ void hmc_crypt_decrypt(const char *in, size_t in_sz, char *out, size_t out_sz) {
   GERR(gpgme_op_decrypt(hmc_crypt_ctx, data_in, data_out), "Failed to decrypt data");
 
   assert(gpgme_data_seek(data_out, 0, SEEK_SET) == 0);
-  size_t _ = gpgme_data_read(data_out, out, out_sz);
+  size_t mlen = gpgme_data_read(data_out, out, out_sz);
+  return mlen;
 }

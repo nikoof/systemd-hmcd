@@ -28,6 +28,7 @@ uint8_t hmc_net_serve(struct hmc_net_socket_serve *__restrict e, uint16_t port) 
 
   ENEG(bind(e->fd, (struct sockaddr*)&addr, sizeof(addr)), "Could not bind socket to port %u! %m", port);
   nob_log(NOB_INFO, "systemd_hmcd: Started listening on port %hu", port);
+
   ENEG(listen(e->fd, 1), "Could not set up socket to listen! %m");
   socklen_t addrl = sizeof(addr);
   ENEG((e->remote_fd = accept(e->fd, (struct sockaddr*)&addr, &addrl)), "Could not accept connection from remote! %m");
@@ -37,10 +38,11 @@ uint8_t hmc_net_serve(struct hmc_net_socket_serve *__restrict e, uint16_t port) 
 }
 
 uint8_t hmc_net_read(struct hmc_net_socket_serve *__restrict e) {
-  ENEG((e->readl = read(e->remote_fd, e->data, e->msglen + 4)), "Could not read from remote socket! %m");
-  nob_log(NOB_INFO, "Read message %s of len %u!", e->data, e->readl);
-  hmc_crypt_decrypt(e->data, e->readl, e->plaintext, e->msglen);
-  nob_log(NOB_INFO, "Decrypted to %s of len %u!", e->plaintext, e->msglen);
+  ENEG((e->readl = read(e->remote_fd, e->data, 2)), "Could not read from remote socket! %m");
+  uint32_t curmsglen = (uint32_t)((uint8_t)(e->data[0]) << 8) | (uint32_t)((uint8_t)e->data[1]);
+  ENEG((e->readl = read(e->remote_fd, e->data, curmsglen)), "Could not read from remote socket! %m");
+  if (e->readl == 0) { return 0; }
+  e->readl = hmc_crypt_decrypt(e->data, e->readl, e->plaintext, e->msglen);
   return 0;
 }
 
@@ -63,7 +65,6 @@ uint8_t hmc_net_read_handshake(struct hmc_net_socket_serve *__restrict e) {
 }
 
 uint8_t hmc_net_close_read(struct hmc_net_socket_serve *__restrict e) {
-  nob_log(NOB_INFO, "Closing read socket!");
   free(e->data);
   free(e->plaintext);
   ENEG(close(e->fd), "Could not close local fd! %m");
@@ -89,34 +90,32 @@ uint8_t hmc_net_connect(struct hmc_net_socket_connect *__restrict e, char *ip, u
 
 uint8_t hmc_net_send(struct hmc_net_socket_connect *__restrict e, char *__restrict buf, size_t len) {
   size_t mlen = hmc_crypt_encrypt(e->recipient, buf, len, e->cipher, get_big_size(e->msglen));
-  nob_log(NOB_INFO, "Sending %s of len %u!", e->cipher, mlen);
+  uint8_t mlenbuf[2] = {0}; mlenbuf[0] = ((mlen & 0xFF00) >> 8); mlenbuf[1] = (mlen & 0xFF);
+  ENEG(send(e->fd, mlenbuf, 2, 0), "Could not send to remote server! %m");
   ENEG(send(e->fd, e->cipher, mlen, 0), "Could not send to remote server! %m");
   return 0;
 }
 
-uint8_t hmc_net_send_handshake(struct hmc_net_socket_connect *__restrict e, const char *recipient, uint32_t datalen, uint32_t msglen) {
+uint8_t hmc_net_send_handshake(struct hmc_net_socket_connect *__restrict e, const char *recipient) {
   char buf[512] = {0};
   buf[0] = 0x69;
   buf[1] = 0x69;
 #define SU(data,shift) (((data)>>(shift))&0xFF)
-  buf[2] = SU(datalen, 24);
-  buf[3] = SU(datalen, 16);
-  buf[4] = SU(datalen,  8);
-  buf[5] = SU(datalen,  0);
-  buf[6] = SU( msglen, 24);
-  buf[7] = SU( msglen, 16);
-  buf[8] = SU( msglen,  8);
-  buf[9] = SU( msglen,  0);
+  buf[2] = SU(e->datalen, 24);
+  buf[3] = SU(e->datalen, 16);
+  buf[4] = SU(e->datalen,  8);
+  buf[5] = SU(e->datalen,  0);
+  buf[6] = SU(e-> msglen, 24);
+  buf[7] = SU(e-> msglen, 16);
+  buf[8] = SU(e-> msglen,  8);
+  buf[9] = SU(e-> msglen,  0);
 #undef SU
-  e->cipher = malloc(get_big_size(msglen));
+  e->cipher = malloc(get_big_size(e->msglen));
   e->recipient = recipient;
-  e->msglen = msglen;
-  nob_log(NOB_INFO, "Sending handshake datalen %u msglen %u!", datalen, msglen);
   hmc_net_send(e, buf, 10);
 }
 
 uint8_t hmc_net_close_connect(struct hmc_net_socket_connect *__restrict e) {
-  nob_log(NOB_INFO, "Closing connection socket!");
   free(e->cipher);
   ENEG(close(e->fd), "Could not close local fd! %m");
 }

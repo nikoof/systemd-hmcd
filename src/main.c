@@ -3,8 +3,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <sys/stat.h>
 
 #include "net.h"
+#include "util.h"
 #include "crypt.h"
 
 #define NOB_IMPLEMENTATION
@@ -17,6 +19,19 @@ void usage(FILE *stream) {
   fprintf(stream, "usage: ./systemd-hmcd [OPTIONS]\n");
   fprintf(stream, "OPTIONS:\n");
   flag_print_options(stream);
+}
+
+void print_progressbar(uint32_t cur, uint32_t tot) {
+  int32_t i;
+  float proc = (float)cur / (float)tot;
+  uint32_t width = 20;
+  uint32_t donec = width * proc;
+  /// TODO: Add colour
+  fputc('[', stdout);
+  for(i = 0; i < donec; ++i) { fputc('#', stdout); }
+  for(i = donec; i < width; ++i) { fputc('-', stdout); }
+  fprintf(stdout, "] (%3u%%)\r", (uint32_t)(proc * 100));
+  fflush(stdout);
 }
 
 int main(int argc, char **argv) {
@@ -48,67 +63,64 @@ int main(int argc, char **argv) {
 
   hmc_crypt_init();
 
-  FILE *input_file  = (*input == NULL)  ? stdin  : fopen(*input, "r");
-  FILE *output_file = (*output == NULL) ? stdout : fopen(*output, "w");
-
-  Nob_String_Builder sb = {0};
-  char out[1024] = {0};
-  if (!(*listen)) {
-    if (*input == NULL) {
-      char buf[1 << 16] = {0};
-      size_t count;
-      while (!(count = fread(buf, 1, 1 << 16, input_file))) {
-        nob_sb_append_buf(&sb, buf, count);
-      }
-      hmc_crypt_encrypt(*recipient, sb.items, sb.count, out, 1024);
-      fprintf(output_file, "%s\n", out);
-    } else {
-      nob_log(NOB_INFO, "Reading from %s", *input);
-      if (!nob_read_entire_file(*input, &sb)) exit(EXIT_FAILURE);
-      hmc_crypt_encrypt(*recipient, sb.items, sb.count, out, 1024);
-      fprintf(output_file, "%s\n", out);
-    }
-  } else {
-    if (*input != NULL) {
-      if (!nob_read_entire_file(*input, &sb)) exit(EXIT_FAILURE);
-    }
-    hmc_crypt_decrypt(sb.items, sb.count, out, 1024);
-    fprintf(output_file, "%s\n", out);
-  }
-
-
   printf("listen: %d\n", *listen);
   printf("key_fpr: %s\n", *recipient);
   printf("port: %zu\n", *port);
 
   if (*listen) {
+    int32_t output_fd;
+    if (*output == NULL) { output_fd = STDOUT_FILENO; }
+    else {
+      ENEG(output_fd = open(*output, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH), "Could not open %s for writing! %m\n", *output);
+    }
     struct hmc_net_socket_serve e;
     hmc_net_serve(&e, *port);
     hmc_net_read_handshake(&e);
-    fprintf(stdout, "Handshake finalized! datalen %u msglen %u\n", e.datalen, e.msglen);
-    /*
-    for(uint32_t i = 0; i < 20; ++i) {
-      hmc_net_read(&e)
+    fprintf(stdout, "\n");
+    print_progressbar(0, e.datalen);
+    uint32_t clen = 0;
+    while ((hmc_net_read(&e) == 0) && (e.readl > 0)) {
+      ENEG(write(output_fd, e.plaintext, e.readl), "Could not write %u bytes to %s! %m\n", e.readl, *output);
+      clen += e.readl;
+      print_progressbar(clen, e.datalen);
     }
-    */
     hmc_net_close_read(&e);
-    fprintf(stdout, "Peer closed connection!\n");
+    nob_log(NOB_INFO, "Peer closed connection!\n");
+    close(output_fd);
   } else {
     if (*recipient == NULL || **recipient == '\0') {
       nob_log(NOB_ERROR, "Cannot connect to remote if encryption recipient is unknown!");
-      usage(stderr);
-      exit(EXIT_FAILURE);
+      usage(stderr); exit(EXIT_FAILURE);
     }
     if (*targetip == NULL || **targetip == '\0') {
       nob_log(NOB_ERROR, "Cannot connect to remote if target ip is unknown!");
-      usage(stderr);
-      exit(EXIT_FAILURE);
+      usage(stderr); exit(EXIT_FAILURE);
     }
+    int32_t input_fd;
     struct hmc_net_socket_connect e;
+    e.msglen = 2048;
+    if (*input == NULL) {
+      input_fd = STDIN_FILENO;
+      e.datalen = 0;
+    } else {
+      ENEG((input_fd = open(*input, O_RDONLY)), "Could not open file %s! %m");
+      struct stat st; stat(*input, &st);
+      e.datalen = st.st_size;
+    }
     hmc_net_connect(&e, *targetip, *port);
-    hmc_net_send_handshake(&e, *recipient, 200, 200);
+    hmc_net_send_handshake(&e, *recipient);
+
+    char *input_buf;
+    ENULL((input_buf = malloc(e.msglen)), "Could not allocate %u bytes for file reading!\n", e.msglen);
+
+    ssize_t readl;
+    while ((readl = read(input_fd, input_buf, e.msglen)) > 0) {
+      hmc_net_send(&e, input_buf, readl);
+    }
+    ENEG(readl, "Could not read from %s! %m\n", (*input == NULL) ? "stdin" : *input)
     hmc_net_close_connect(&e);
-    fprintf(stdout, "Done!\n");
+    free(input_buf);
+    close(input_fd);
   }
 
   return 0;
