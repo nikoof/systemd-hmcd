@@ -52,7 +52,7 @@ void run_client(char **input, char **recipient, char **targetip, uint64_t *port)
   if (*input == NULL) {
     input_fd = STDIN_FILENO; e.datalen = 0;
   } else {
-    ENEG((input_fd = open(*input, O_RDONLY)), "Could not open file %s! %m");
+    ENEG((input_fd = open(*input, O_RDONLY)), "Could not open file %s! %m", *input);
     struct stat st; stat(*input, &st); e.datalen = st.st_size;
   }
 
