@@ -87,7 +87,7 @@ void run_server(char **output, uint64_t *port) {
   print_progressbar(0, e.datalen);
   uint32_t clen = 0, readl;
   while ((readl = hmc_net_read(&e))) {
-    ENEG(write(output_fd, e.plaintext, readl), "Could not write %u bytes to %s! %m\n", readl, *output);
+    ENEG(write(output_fd, e.plaintext_sb.items, readl), "Could not write %u bytes to %s! %m\n", readl, *output);
     clen += readl;
     print_progressbar(clen, e.datalen);
   }
