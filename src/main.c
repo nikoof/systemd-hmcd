@@ -22,7 +22,7 @@ void usage(FILE *stream) {
 }
 
 void print_progressbar(uint32_t cur, uint32_t tot) {
-  int32_t i;
+  uint32_t i;
   float proc = (float)cur / (float)tot;
   uint32_t width = 20;
   uint32_t donec = width * proc;
@@ -55,6 +55,7 @@ void run_client(char **input, char **recipient, char **targetip, uint64_t *port)
     ENEG((input_fd = open(*input, O_RDONLY)), "Could not open file %s! %m", *input);
     struct stat st; stat(*input, &st); e.datalen = st.st_size;
   }
+  memset(&e.cipher_sb, 0, sizeof(e.cipher_sb));
 
   hmc_net_connect(&e, *targetip, *port);
   hmc_net_send_handshake(&e, *recipient);
@@ -81,6 +82,8 @@ void run_server(char **output, uint64_t *port) {
     ENEG(output_fd = open(*output, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH), "Could not open %s for writing! %m\n", *output);
   }
   struct hmc_net_socket_serve e;
+  memset(&e.cipher_sb, 0, sizeof(e.cipher_sb));
+  memset(&e.plaintext_sb, 0, sizeof(e.plaintext_sb));
   hmc_net_serve(&e, *port);
   hmc_net_read_handshake(&e);
   fprintf(stdout, "\n");

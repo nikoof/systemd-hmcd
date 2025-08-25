@@ -16,7 +16,7 @@ typedef struct {
 } Hmc_String_Builder;
 
 void hmc_crypt_init();
-Hmc_String_Builder hmc_crypt_encrypt(const char *recp, const char* in, size_t in_sz);
-Hmc_String_Builder hmc_crypt_decrypt(const char *in, size_t in_sz);
+void hmc_crypt_encrypt(const char *recp, const char* in, size_t in_sz, Hmc_String_Builder *out);
+void hmc_crypt_decrypt(const char *in, size_t in_sz, Hmc_String_Builder *out);
 
 #endif

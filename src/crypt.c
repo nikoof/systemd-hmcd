@@ -41,6 +41,7 @@ off_t hmc_crypt_seek_sb(void *handle, off_t offset, int whence) {
 }
 
 void hmc_crypt_release_sb(void *handle) {
+  nob_log(NOB_INFO, "Dis bih released they string builder!!!!!\n");
   nob_sb_free(*(Hmc_String_Builder*)handle);
 }
 
@@ -62,14 +63,13 @@ void hmc_crypt_init() {
   gpgme_set_armor(hmc_crypt_ctx, 1);
 }
 
-Hmc_String_Builder hmc_crypt_encrypt(const char *recp, const char* in, size_t in_sz) {
+void hmc_crypt_encrypt(const char *recp, const char* in, size_t in_sz, Hmc_String_Builder *out) {
   gpgme_key_t recp_key[2] = {0};
   GERR(gpgme_get_key(hmc_crypt_ctx, recp, &recp_key[0], 0), "Failed to get key with fingerprint %s", recp);
 
-  Hmc_String_Builder sb = {0};
   gpgme_data_t data_in = {0}, data_out = {0};
   GERR(gpgme_data_new_from_mem(&data_in, in, in_sz, 1), "Failed to create GPGME data object");
-  GERR(gpgme_data_new_from_cbs(&data_out, &GPGME_DATA_SB, &sb), "Failed to create GPGME data object");
+  GERR(gpgme_data_new_from_cbs(&data_out, &GPGME_DATA_SB, out), "Failed to create GPGME data object");
 
   GERR(gpgme_op_encrypt(hmc_crypt_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
   gpgme_encrypt_result_t result = gpgme_op_encrypt_result(hmc_crypt_ctx);
@@ -79,17 +79,14 @@ Hmc_String_Builder hmc_crypt_encrypt(const char *recp, const char* in, size_t in
 
   gpgme_data_release(data_in);
   assert(gpgme_data_seek(data_out, 0, SEEK_SET) == 0);
-  return sb;
 }
 
-Hmc_String_Builder hmc_crypt_decrypt(const char *in, size_t in_sz) {
-  Hmc_String_Builder sb = {0};
+void hmc_crypt_decrypt(const char *in, size_t in_sz, Hmc_String_Builder *out) {
   gpgme_data_t data_in = {0}, data_out = {0};
   GERR(gpgme_data_new_from_mem(&data_in, in, in_sz, 1), "Failed to create GPGME data object");
-  GERR(gpgme_data_new_from_cbs(&data_out, &GPGME_DATA_SB, &sb), "Failed to create GPGME data object");
+  GERR(gpgme_data_new_from_cbs(&data_out, &GPGME_DATA_SB, out), "Failed to create GPGME data object");
 
   GERR(gpgme_op_decrypt(hmc_crypt_ctx, data_in, data_out), "Failed to decrypt data");
 
   assert(gpgme_data_seek(data_out, 0, SEEK_SET) == 0);
-  return sb;
 }
