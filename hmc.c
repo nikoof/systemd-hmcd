@@ -18,9 +18,6 @@
 #include "flag.h"
 
 #define _EE(op, targ, cmd, res, args...) {if ((cmd) op (targ)) { nob_log(NOB_ERROR, "systemd_hmcd: " res "\n", ##args); exit(EXIT_FAILURE); } }
-#define EZERO(cmd, res, args...) _EE(==,    0, cmd, res, ##args)
-#define ENULL(cmd, res, args...) _EE(==, NULL, cmd, res, ##args)
-#define  ENEZ(cmd, res, args...) _EE(!=,    0, cmd, res, ##args)
 #define  ENEG(cmd, res, args...) _EE(< ,    0, cmd, res, ##args)
 
 #define GERR(cmd, fmt, args...) \
@@ -149,39 +146,77 @@ void hmc_init(Hmc_Context *ctx) {
   GERR(gpgme_set_locale(NULL, LC_CTYPE, setlocale(LC_CTYPE, NULL)), "Failed to set GPGME locale");
 
   GERR(gpgme_new(&ctx->gpgme_ctx), "Failed to initialize GPGME context");
-  gpgme_set_armor(ctx->gpgme_ctx, 1);
+  gpgme_set_armor(ctx->gpgme_ctx, 0);
 }
 
 void hmc_net_connect(int32_t *fd, const char *targetip, uint16_t port) {
-  ENEG((*fd = socket(AF_INET, SOCK_STREAM, 0)), "Could not create connecting socket! %m");
+  /// TODO: Support ipv6
+  struct sockaddr_in6 serv_addr6;
+  serv_addr6.sin6_family = AF_INET6;
+  serv_addr6.sin6_port = htons(port);
   struct sockaddr_in serv_addr;
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_port = htons(port);
+  struct sockaddr *addrp;
+  socklen_t addrl;
+  int socktype;
 
-  ENEG(inet_pton(AF_INET, targetip, &serv_addr.sin_addr) - 1, "Could not parse address %s! %s", targetip, (errno == EAFNOSUPPORT) ? strerror(errno) : "Invalid address");
-  ENEG(connect(*fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)), "Could not connect to %s:%hu! %m", targetip, (unsigned short)port);
+
+  if (inet_pton(AF_INET, targetip, &serv_addr.sin_addr)) {
+    addrp = (struct sockaddr*)&serv_addr;
+    addrl = sizeof(serv_addr);
+    socktype = AF_INET;
+  } else if (inet_pton(AF_INET6, targetip, &serv_addr6.sin6_addr)) {
+    addrp = (struct sockaddr*)&serv_addr6;
+    addrl = sizeof(serv_addr6);
+    socktype = AF_INET6;
+  } else {
+    ENEG(-1, "Address %s invalid!\n", targetip);
+  }
+
+  ENEG((*fd = socket(socktype, SOCK_STREAM, 0)), "Could not create connecting socket! %m");
+
+  ENEG(connect(*fd, addrp, addrl), "Could not connect to %s:%hu! %m", targetip, (unsigned short)port);
   nob_log(NOB_INFO, "Connected to remote %s:%hu!", targetip, (unsigned short)port);
 }
 
-int32_t hmc_net_serve(int32_t *fd, uint16_t port) {
-  /// TODO: Support ipv6
+int32_t hmc_net_serve(int32_t *fd, uint16_t port, uint8_t ipv6) {
   int32_t remote_fd;
-  ENEG((*fd = socket(AF_INET, SOCK_STREAM, 0)), "Could not create listening socket! %m");
+  int opt = 0;
+  if (ipv6) {
+    ENEG((*fd = socket(AF_INET6, SOCK_STREAM, 0)), "Could not create listening socket! %m");
+    ENEG(setsockopt(*fd, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)), "Could not set ipv6 socket options! %m");
+  } else {
+    ENEG((*fd = socket(AF_INET, SOCK_STREAM, 0)), "Could not create listening socket! %m");
+  }
 
-  int opt = 1;
+  opt = 1;
   ENEG(setsockopt(*fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)), "Could not set socket options! %m");
 
-  struct sockaddr_in addr;
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = INADDR_ANY;
-  addr.sin_port = htons(port);
+  struct sockaddr_in6 addr6 = {0};
+  struct sockaddr_in addr = {0};
+  struct sockaddr *addrp;
+  socklen_t addrl;
 
-  ENEG(bind(*fd, (struct sockaddr*)&addr, sizeof(addr)), "Could not bind socket to port %u! %m", port);
+  if (ipv6) {
+    addr6.sin6_family = AF_INET6;
+    addr6.sin6_addr = in6addr_any;
+    addr6.sin6_port = htons(port);
+    addrp = (struct sockaddr*)&addr6;
+    addrl = sizeof(addr6);
+  } else {
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+    addrp = (struct sockaddr*)&addr;
+    addrl = sizeof(addr);
+  }
+
+  ENEG(bind(*fd, addrp, addrl), "Could not bind socket to port %u! %m", port);
   nob_log(NOB_INFO, "systemd_hmcd: Started listening on port %hu", port);
 
   ENEG(listen(*fd, 1), "Could not set up socket to listen! %m");
-  socklen_t addrl = sizeof(addr);
-  ENEG((remote_fd = accept(*fd, (struct sockaddr*)&addr, &addrl)), "Could not accept connection from remote! %m");
+  ENEG((remote_fd = accept(*fd, addrp, &addrl)), "Could not accept connection from remote! %m");
   nob_log(NOB_INFO, "systemd_hmcd: Got connection from %u", remote_fd);
 
   return remote_fd;
@@ -211,7 +246,7 @@ void run_client(Hmc_Context ctx, char **input, char **recipient, char **targetip
   close(dh.file_fd);
 }
 
-void run_server(Hmc_Context ctx, char **output, uint64_t *port) {
+void run_server(Hmc_Context ctx, char **output, uint64_t *port, uint8_t ipv6) {
   Hmc_Data_Server dh = {0};
 
   if (*output == NULL) { dh.file_fd = STDOUT_FILENO; }
@@ -220,7 +255,7 @@ void run_server(Hmc_Context ctx, char **output, uint64_t *port) {
   }
 
   int32_t local_fd;
-  dh.net_fd = hmc_net_serve(&local_fd, *port);
+  dh.net_fd = hmc_net_serve(&local_fd, *port, ipv6);
 
   gpgme_data_t data_in = {0}, data_out = {0};
   GERR(gpgme_data_new_from_cbs(&data_in, &SERVER_CBS, &dh), "Failed to create GPGME data object");
@@ -238,6 +273,7 @@ void fusage(FILE *stream, const char *progname) {
 int main(int argc, char **argv) {
   bool *help = flag_bool("help", false, "Print this message and exit.");
   bool *listen = flag_bool("listen", false, "Listen or connect.");
+  bool *ipv6 = flag_bool("6", NULL, "Listen on ipv6");
   char **targetip = flag_str("targetip", NULL, "Peer ip to connect to.");
   char **recipient = flag_str("recipient", NULL, "GPG fingerprint of recipient key.");
   uint64_t *port = flag_uint64("port", 6969, "Port to listen on.");
@@ -266,7 +302,7 @@ int main(int argc, char **argv) {
   hmc_init(&ctx);
 
   if (*listen) {
-    run_server(ctx, output, port);
+    run_server(ctx, output, port, *ipv6);
   } else {
     if (*recipient == NULL || **recipient == '\0') {
       nob_log(NOB_ERROR, "Cannot connect to remote if encryption recipient is unknown!");
