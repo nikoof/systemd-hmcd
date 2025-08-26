@@ -19,11 +19,17 @@ typedef struct {
 typedef struct {
   int32_t net_fd;
   int32_t file_fd;
+
+  size_t received_bytes;
+  size_t total_bytes;
 } Hmc_Data_Server;
 
 typedef struct {
   int32_t net_fd;
   int32_t file_fd;
+
+  size_t sent_bytes;
+  size_t total_bytes;
 } Hmc_Data_Client;
 
 
