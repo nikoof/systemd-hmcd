@@ -64,16 +64,19 @@ void hmc_print_file_size(Nob_String_Builder *sb, const char* fmt, size_t file_si
 }
 
 void hmc_print_progress_bar(FILE *stream, size_t current, size_t total) {
+  static Nob_String_Builder sb = {0};
+  sb.count = 0;
+
   const char *loading_indicator = "-\\|/-";
 
   struct winsize w;
   ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
 
+  if (total == 0) { total = current = 0 ? 1 : current; }
   float proc = (float)current / (float)total;
   size_t width = min(w.ws_col - strlen(" | [] 1024.69/1024.69 MiB (100%)"), 60);
   size_t donec = width * current / total;
 
-  Nob_String_Builder sb;
   nob_sb_appendf(&sb, "\033[2K\033[38;5;2m %c ", loading_indicator[donec % strlen(loading_indicator)]);
   nob_sb_appendf(&sb, "\033[0m[\033[38;5;6m");
   for (size_t i = 0;         i < donec; ++i) { nob_da_append(&sb, '#'); }
