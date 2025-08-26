@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 
 #include <gpgme.h>
 
@@ -18,9 +19,12 @@
 #define FLAG_IMPLEMENTATION
 #include "flag.h"
 
-#define _EE(op, targ, cmd, res, args...) {if ((cmd) op (targ)) { nob_log(NOB_ERROR, "systemd_hmcd: " res "\n", ##args); exit(EXIT_FAILURE); } }
-#define  ENEZ(cmd, res, args...) _EE(!=,    0, cmd, res, ##args)
-#define  ENEG(cmd, res, args...) _EE(< ,    0, cmd, res, ##args)
+#define min(a, b) (a < b ? a : b)
+
+#define _EE(op, targ, cmd, res, args...) \
+  { if ((cmd) op (targ)) { nob_log(NOB_ERROR, "systemd_hmcd: " res "\n", ##args); exit(EXIT_FAILURE); } }
+#define ENEZ(cmd, res, args...) _EE(!=,    0, cmd, res, ##args)
+#define ENEG(cmd, res, args...) _EE(< ,    0, cmd, res, ##args)
 
 #define GERR(cmd, fmt, args...) \
   { gpgme_error_t err; if ((err = cmd) != 0) { nob_log(NOB_ERROR, "systemd_hmcd: " fmt " (%s)\n", ##args, gpgme_strerror(err)); } }
@@ -45,16 +49,40 @@ typedef struct {
   size_t total_bytes;
 } Hmc_Data_Client;
 
-void print_progressbar(uint32_t cur, uint32_t tot) {
-  uint32_t i;
-  float proc = (float)cur / (float)tot;
-  uint32_t width = 20;
-  uint32_t donec = width * proc;
-  /// TODO: Add colour
-  fputc('[', stdout);
-  for(i = 0; i < donec; ++i) { fputc('#', stdout); }
-  for(i = donec; i < width; ++i) { fputc('-', stdout); }
-  fprintf(stdout, "] (%3u%%)\r", (uint32_t)(proc * 100));
+void hmc_print_file_size(FILE *file, const char* fmt, size_t file_size) {
+  // 1 PiB shouldn't fit into a uint64 but alas
+  const char *units[] = { "B", "KiB", "MiB", "GiB", "TiB", "EiB", "PiB" };
+
+  size_t index = 0;
+  double display_size = (double)file_size;
+  while (display_size >= 1024 && index < NOB_ARRAY_LEN(units)) {
+    display_size /= 1024;
+    index += 1;
+  }
+
+  fprintf(file, fmt, display_size, units[index]);
+}
+
+void hmc_print_progress_bar(size_t current, size_t total) {
+  const char *loading_indicator = "-\\|/-";
+
+  struct winsize w;
+  ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+
+  float proc = (float)current / (float)total;
+  size_t width = min(w.ws_col, 60);
+  size_t donec = width * current / total;
+
+  fprintf(stdout, "\r\033[2K\033[38;5;2m %c ", loading_indicator[donec % strlen(loading_indicator)]);
+  fprintf(stdout, "\033[0m[\033[38;5;6m");
+  for (size_t i = 0;         i < donec; ++i) { fputc('#', stdout); }
+  fputc(donec != width ? '>' : '#', stdout);
+  for (size_t i = donec + 1; i < width; ++i) { fputc('-', stdout); }
+  fprintf(stdout, "\033[0m] ");
+  hmc_print_file_size(stdout, "%.02f", current);
+  fputc('/', stdout);
+  hmc_print_file_size(stdout, "%.02f %s", total);
+  fprintf(stdout, " (%3u%%)", (uint32_t)(proc * 100));
   fflush(stdout);
 }
 
@@ -83,14 +111,14 @@ ssize_t hmc_crypt_write_file(void *handle, const void *buffer, size_t size) {
     if (e->received_bytes == 4) {
       e->total_bytes = ntohl(file_size.sz);
 
-      print_progressbar(e->received_bytes, e->total_bytes);
+      hmc_print_progress_bar(e->received_bytes, e->total_bytes);
       ssize_t writel = write(e->file_fd, buffer + offset, size);
       return (writel == -1) ? -1 : offset + writel;
     }
   }
 
   e->received_bytes += size;
-  print_progressbar(e->received_bytes, e->total_bytes);
+  hmc_print_progress_bar(e->received_bytes, e->total_bytes);
   return write(e->file_fd, buffer, size);
 }
 
@@ -114,13 +142,13 @@ ssize_t hmc_crypt_read_file(void *handle, void *buffer, size_t size) {
     }
 
     if (e->sent_bytes == 4) {
-      print_progressbar(e->sent_bytes, e->total_bytes);
+      hmc_print_progress_bar(e->sent_bytes, e->total_bytes);
       ssize_t readl = read(e->file_fd, buffer + offset, size);
       return (readl == -1) ? -1 : offset + readl;
     }
   }
 
-  print_progressbar(e->sent_bytes, e->total_bytes);
+  hmc_print_progress_bar(e->sent_bytes, e->total_bytes);
   e->sent_bytes += size;
   return read(e->file_fd, buffer, size);
 }
@@ -139,17 +167,6 @@ static struct gpgme_data_cbs CLIENT_CBS = {
   .read = &hmc_crypt_read_file,
   .write = &hmc_crypt_write_net,
 };
-
-void hmc_init(Hmc_Context *ctx) {
-  setlocale(LC_ALL, "");
-
-  gpgme_check_version(NULL);
-  GERR(gpgme_engine_check_version(GPGME_PROTOCOL_OpenPGP), "Failed GPGME version check");
-  GERR(gpgme_set_locale(NULL, LC_CTYPE, setlocale(LC_CTYPE, NULL)), "Failed to set GPGME locale");
-
-  GERR(gpgme_new(&ctx->gpgme_ctx), "Failed to initialize GPGME context");
-  gpgme_set_armor(ctx->gpgme_ctx, 0);
-}
 
 void hmc_net_connect(int32_t *fd, char *targetip, uint16_t port) { // TODO: Change name targetip
   char newip[100];
@@ -237,7 +254,19 @@ int32_t hmc_net_serve(int32_t *fd, uint16_t port, uint8_t ipv6) {
   return remote_fd;
 }
 
-void run_client(Hmc_Context ctx, char **input, char **recipient, char **targetip, uint64_t *port) {
+void hmc_init(Hmc_Context *ctx) {
+  setlocale(LC_ALL, "");
+
+  gpgme_check_version(NULL);
+  GERR(gpgme_engine_check_version(GPGME_PROTOCOL_OpenPGP), "Failed GPGME version check");
+  GERR(gpgme_set_locale(NULL, LC_CTYPE, setlocale(LC_CTYPE, NULL)), "Failed to set GPGME locale");
+
+  GERR(gpgme_new(&ctx->gpgme_ctx), "Failed to initialize GPGME context");
+  gpgme_set_armor(ctx->gpgme_ctx, 0);
+}
+
+
+void hmc_run_client(Hmc_Context ctx, char **input, char **recipient, char **targetip, uint64_t *port) {
   Hmc_Data_Client dh = {0};
 
   if (*input == NULL) {
@@ -257,11 +286,13 @@ void run_client(Hmc_Context ctx, char **input, char **recipient, char **targetip
   GERR(gpgme_get_key(ctx.gpgme_ctx, *recipient, &recp_key[0], 0), "Failed to get key with fingerprint %s", *recipient);
   GERR(gpgme_op_encrypt(ctx.gpgme_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
 
+  hmc_print_progress_bar(dh.total_bytes, dh.total_bytes);
+
   close(dh.net_fd);
   close(dh.file_fd);
 }
 
-void run_server(Hmc_Context ctx, char **output, uint64_t *port, uint8_t ipv6) {
+void hmc_run_server(Hmc_Context ctx, char **output, uint64_t *port, uint8_t ipv6) {
   Hmc_Data_Server dh = {0};
 
   if (*output == NULL) { dh.file_fd = STDOUT_FILENO; }
@@ -277,6 +308,8 @@ void run_server(Hmc_Context ctx, char **output, uint64_t *port, uint8_t ipv6) {
   GERR(gpgme_data_new_from_cbs(&data_out, &SERVER_CBS, &dh), "Failed to create GPGME data object");
 
   GERR(gpgme_op_decrypt(ctx.gpgme_ctx, data_in, data_out), "Failed to decrypt data");
+
+  hmc_print_progress_bar(dh.total_bytes, dh.total_bytes);
 }
 
 void fusage(FILE *stream, const char *progname) {
@@ -286,15 +319,15 @@ void fusage(FILE *stream, const char *progname) {
 }
 
 int main(int argc, char **argv) {
-  bool *help = flag_bool("help", false, "Print this message and exit.");
-  bool *listen = flag_bool("listen", false, "Listen or connect.");
-  bool *ipv6 = flag_bool("6", NULL, "Listen on ipv6");
-  char **targetip = flag_str("targetip", NULL, "Peer ip to connect to.");
-  char **recipient = flag_str("recipient", NULL, "GPG fingerprint of recipient key.");
-  uint64_t *port = flag_uint64("port", 6969, "Port to listen on.");
+  bool *help       = flag_bool  ("help",      false, "Print this message and exit.");
+  bool *listen     = flag_bool  ("listen",    false, "Listen or connect.");
+  bool *ipv6       = flag_bool  ("6",         NULL,  "Listen on ipv6.");
+  char **input     = flag_str   ("input",     NULL,  "Input file. If unspecified, read from stdin.");
+  char **output    = flag_str   ("output",    NULL,  "Output file. If unspecified, print to stdout.");
+  char **targetip  = flag_str   ("targetip",  NULL,  "Peer ip to connect to.");
+  char **recipient = flag_str   ("recipient", NULL,  "GPG fingerprint of recipient key.");
+  uint64_t *port   = flag_uint64("port",      6969,  "Port to listen on.");
 
-  char **input = flag_str("input", NULL, "Input file. If unspecified, read from stdin.");
-  char **output = flag_str("output", NULL, "Output file. If unspecified, print to stdout.");
 
   if (!flag_parse(argc, argv)) {
     fusage(stderr, argv[0]);
@@ -317,7 +350,7 @@ int main(int argc, char **argv) {
   hmc_init(&ctx);
 
   if (*listen) {
-    run_server(ctx, output, port, *ipv6);
+    hmc_run_server(ctx, output, port, *ipv6);
   } else {
     if (*recipient == NULL || **recipient == '\0') {
       nob_log(NOB_ERROR, "Cannot connect to remote if encryption recipient is unknown!");
@@ -329,8 +362,9 @@ int main(int argc, char **argv) {
       fusage(stderr, argv[0]); exit(EXIT_FAILURE);
     }
 
-    run_client(ctx, input, recipient, targetip, port);
+    hmc_run_client(ctx, input, recipient, targetip, port);
   }
 
+  printf("\n");
   return 0;
 }
