@@ -83,7 +83,7 @@ void hmc_print_progress_bar(FILE *stream, size_t current, size_t total) {
   hmc_print_file_size(&sb, "%.02f", current);
   nob_da_append(&sb, '/');
   hmc_print_file_size(&sb, "%.02f %s", total);
-  nob_sb_appendf(&sb, "(%3u%%)\r", (uint32_t)(proc * 100));
+  nob_sb_appendf(&sb, " (%3u%%)\r", (uint32_t)(proc * 100));
   nob_da_append(&sb, '\0');
   fputs(sb.items, stream);
   fflush(stream);
