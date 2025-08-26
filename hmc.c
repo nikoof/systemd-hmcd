@@ -49,7 +49,7 @@ typedef struct {
   size_t total_bytes;
 } Hmc_Data_Client;
 
-void hmc_print_file_size(FILE *file, const char* fmt, size_t file_size) {
+void hmc_print_file_size(FILE *stream, const char* fmt, size_t file_size) {
   // 1 PiB shouldn't fit into a uint64 but alas
   const char *units[] = { "B", "KiB", "MiB", "GiB", "TiB", "EiB", "PiB" };
 
@@ -60,30 +60,30 @@ void hmc_print_file_size(FILE *file, const char* fmt, size_t file_size) {
     index += 1;
   }
 
-  fprintf(file, fmt, display_size, units[index]);
+  fprintf(stream, fmt, display_size, units[index]);
 }
 
-void hmc_print_progress_bar(size_t current, size_t total) {
+void hmc_print_progress_bar(FILE *stream, size_t current, size_t total) {
   const char *loading_indicator = "-\\|/-";
 
   struct winsize w;
   ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
 
   float proc = (float)current / (float)total;
-  size_t width = min(w.ws_col, 60);
+  size_t width = min(w.ws_col - strlen(" | [] 1024.69/1024.69 MiB (100%)"), 60);
   size_t donec = width * current / total;
 
-  fprintf(stdout, "\r\033[2K\033[38;5;2m %c ", loading_indicator[donec % strlen(loading_indicator)]);
-  fprintf(stdout, "\033[0m[\033[38;5;6m");
-  for (size_t i = 0;         i < donec; ++i) { fputc('#', stdout); }
-  fputc(donec != width ? '>' : '#', stdout);
-  for (size_t i = donec + 1; i < width; ++i) { fputc('-', stdout); }
-  fprintf(stdout, "\033[0m] ");
-  hmc_print_file_size(stdout, "%.02f", current);
-  fputc('/', stdout);
-  hmc_print_file_size(stdout, "%.02f %s", total);
-  fprintf(stdout, " (%3u%%)", (uint32_t)(proc * 100));
-  fflush(stdout);
+  fprintf(stream, "\r\033[2K\033[38;5;2m %c ", loading_indicator[donec % strlen(loading_indicator)]);
+  fprintf(stream, "\033[0m[\033[38;5;6m");
+  for (size_t i = 0;         i < donec; ++i) { fputc('#', stream); }
+  fputc(donec != width ? '>' : '#', stream);
+  for (size_t i = donec + 1; i < width; ++i) { fputc('-', stream); }
+  fprintf(stream, "\033[0m] ");
+  hmc_print_file_size(stream, "%.02f", current);
+  fputc('/', stream);
+  hmc_print_file_size(stream, "%.02f %s", total);
+  fprintf(stream, " (%3u%%)", (uint32_t)(proc * 100));
+  fflush(stream);
 }
 
 ssize_t hmc_crypt_read_net(void *handle, void *buffer, size_t size) {
@@ -111,14 +111,14 @@ ssize_t hmc_crypt_write_file(void *handle, const void *buffer, size_t size) {
     if (e->received_bytes == 4) {
       e->total_bytes = ntohl(file_size.sz);
 
-      hmc_print_progress_bar(e->received_bytes, e->total_bytes);
+      hmc_print_progress_bar(stderr, e->received_bytes, e->total_bytes);
       ssize_t writel = write(e->file_fd, buffer + offset, size);
       return (writel == -1) ? -1 : offset + writel;
     }
   }
 
   e->received_bytes += size;
-  hmc_print_progress_bar(e->received_bytes, e->total_bytes);
+  hmc_print_progress_bar(stderr,e->received_bytes, e->total_bytes);
   return write(e->file_fd, buffer, size);
 }
 
@@ -142,13 +142,13 @@ ssize_t hmc_crypt_read_file(void *handle, void *buffer, size_t size) {
     }
 
     if (e->sent_bytes == 4) {
-      hmc_print_progress_bar(e->sent_bytes, e->total_bytes);
+      hmc_print_progress_bar(stderr, e->sent_bytes, e->total_bytes);
       ssize_t readl = read(e->file_fd, buffer + offset, size);
       return (readl == -1) ? -1 : offset + readl;
     }
   }
 
-  hmc_print_progress_bar(e->sent_bytes, e->total_bytes);
+  hmc_print_progress_bar(stderr, e->sent_bytes, e->total_bytes);
   e->sent_bytes += size;
   return read(e->file_fd, buffer, size);
 }
@@ -286,7 +286,7 @@ void hmc_run_client(Hmc_Context ctx, char **input, char **recipient, char **targ
   GERR(gpgme_get_key(ctx.gpgme_ctx, *recipient, &recp_key[0], 0), "Failed to get key with fingerprint %s", *recipient);
   GERR(gpgme_op_encrypt(ctx.gpgme_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
 
-  hmc_print_progress_bar(dh.total_bytes, dh.total_bytes);
+  hmc_print_progress_bar(stderr, dh.total_bytes, dh.total_bytes);
 
   close(dh.net_fd);
   close(dh.file_fd);
@@ -309,7 +309,7 @@ void hmc_run_server(Hmc_Context ctx, char **output, uint64_t *port, uint8_t ipv6
 
   GERR(gpgme_op_decrypt(ctx.gpgme_ctx, data_in, data_out), "Failed to decrypt data");
 
-  hmc_print_progress_bar(dh.total_bytes, dh.total_bytes);
+  hmc_print_progress_bar(stderr, dh.total_bytes, dh.total_bytes);
 }
 
 void fusage(FILE *stream, const char *progname) {
