@@ -34,6 +34,16 @@ void print_progressbar(uint32_t cur, uint32_t tot) {
   fflush(stdout);
 }
 
+static struct gpgme_data_cbs SERVER_CBS = {
+  .read = &hmc_read_net,
+  .write = &hmc_write_file,
+};
+
+static struct gpgme_data_cbs CLIENT_CBS = {
+  .read = &hmc_read_file,
+  .write = &hmc_write_net,
+};
+
 void run_client(char **input, char **recipient, char **targetip, uint64_t *port) {
   if (*recipient == NULL || **recipient == '\0') {
     nob_log(NOB_ERROR, "Cannot connect to remote if encryption recipient is unknown!");
@@ -58,21 +68,23 @@ void run_client(char **input, char **recipient, char **targetip, uint64_t *port)
   memset(&e.cipher_sb, 0, sizeof(e.cipher_sb));
 
   hmc_net_connect(&e, *targetip, *port);
-  hmc_net_send_handshake(&e, *recipient);
+  // hmc_net_send_handshake(&e, *recipient);
 
   char *input_buf;
   ENULL((input_buf = malloc(e.msglen)), "Could not allocate %u bytes for file reading!\n", e.msglen);
 
-  ssize_t readl;
-  while ((readl = read(input_fd, input_buf, e.msglen)) > 0) {
-    hmc_net_send(&e, input_buf, readl);
-  }
-  ENEG(readl, "Could not read from %s! %m\n", (*input == NULL) ? "stdin" : *input)
+  Hmc_Data_Client dh = {
+    .net_fd = e.fd,
+    .file_fd = input_fd,
+  };
 
-  free(input_buf);
+  gpgme_data_t data_in = {0}, data_out = {0};
+  GERR(gpgme_data_new_from_cbs(&data_in, &CLIENT_CBS, &dh), "Failed to create GPGME data object");
+  GERR(gpgme_data_new_from_cbs(&data_out, &CLIENT_CBS, &dh), "Failed to create GPGME data object");
 
-  hmc_net_close_connect(&e);
-  close(input_fd);
+  gpgme_key_t recp_key[2] = {0};
+  GERR(gpgme_get_key(hmc_crypt_ctx, *recipient, &recp_key[0], 0), "Failed to get key with fingerprint %s", *recipient);
+  GERR(gpgme_op_encrypt(hmc_crypt_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
 }
 
 void run_server(char **output, uint64_t *port) {
@@ -85,18 +97,18 @@ void run_server(char **output, uint64_t *port) {
   memset(&e.cipher_sb, 0, sizeof(e.cipher_sb));
   memset(&e.plaintext_sb, 0, sizeof(e.plaintext_sb));
   hmc_net_serve(&e, *port);
-  hmc_net_read_handshake(&e);
-  fprintf(stdout, "\n");
-  print_progressbar(0, e.datalen);
-  uint32_t clen = 0, readl;
-  while ((readl = hmc_net_read(&e))) {
-    ENEG(write(output_fd, e.plaintext_sb.items, readl), "Could not write %u bytes to %s! %m\n", readl, *output);
-    clen += readl;
-    print_progressbar(clen, e.datalen);
-  }
-  hmc_net_close_read(&e);
-  nob_log(NOB_INFO, "Peer closed connection!\n");
-  close(output_fd);
+
+  Hmc_Data_Server dh = {
+    .net_fd = e.remote_fd,
+    .file_fd = output_fd,
+  };
+
+  gpgme_data_t data_in = {0}, data_out = {0};
+
+  GERR(gpgme_data_new_from_cbs(&data_in, &SERVER_CBS, &dh), "Failed to create GPGME data object");
+  GERR(gpgme_data_new_from_cbs(&data_out, &SERVER_CBS, &dh), "Failed to create GPGME data object");
+
+  GERR(gpgme_op_decrypt(hmc_crypt_ctx, data_in, data_out), "Failed to decrypt data");
 }
 
 int main(int argc, char **argv) {
@@ -128,9 +140,9 @@ int main(int argc, char **argv) {
 
   hmc_crypt_init();
 
-  printf("listen: %d\n", *listen);
-  printf("key_fpr: %s\n", *recipient);
-  printf("port: %zu\n", *port);
+  // printf("listen: %d\n", *listen);
+  // printf("key_fpr: %s\n", *recipient);
+  // printf("port: %zu\n", *port);
 
   if (*listen) {
     run_server(output, port);
