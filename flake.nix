@@ -17,9 +17,31 @@
       devShells.default = pkgs.mkShell {
         packages = with pkgs; [
           gpgme
+          valgrind
         ];
       };
 
-      formatter = pkgs.alejandra;
+      packages.default = pkgs.stdenv.mkDerivation {
+        pname = "hmc";
+        version = "0.1.0";
+
+        src = ./.;
+
+        buildInputs = [ pkgs.gpgme ];
+
+        buildPhase = ''
+          cc -o nob nob.c
+          ./nob
+        '';
+
+        installPhase = ''
+          mkdir -p $out/bin/
+          cp ./build/hmc $out/bin
+        '';
+      };
+
+      defaultApp = flake-utils.lib.mkApp {
+        drv = self.packages.${system}.default;
+      };
     });
 }
