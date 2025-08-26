@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
@@ -18,6 +19,7 @@
 #include "flag.h"
 
 #define _EE(op, targ, cmd, res, args...) {if ((cmd) op (targ)) { nob_log(NOB_ERROR, "systemd_hmcd: " res "\n", ##args); exit(EXIT_FAILURE); } }
+#define  ENEZ(cmd, res, args...) _EE(!=,    0, cmd, res, ##args)
 #define  ENEG(cmd, res, args...) _EE(< ,    0, cmd, res, ##args)
 
 #define GERR(cmd, fmt, args...) \
@@ -149,8 +151,9 @@ void hmc_init(Hmc_Context *ctx) {
   gpgme_set_armor(ctx->gpgme_ctx, 0);
 }
 
-void hmc_net_connect(int32_t *fd, const char *targetip, uint16_t port) {
+void hmc_net_connect(int32_t *fd, char *targetip, uint16_t port) { // TODO: Change name targetip
   /// TODO: Support ipv6
+  char newip[100];
   struct sockaddr_in6 serv_addr6;
   serv_addr6.sin6_family = AF_INET6;
   serv_addr6.sin6_port = htons(port);
@@ -161,7 +164,6 @@ void hmc_net_connect(int32_t *fd, const char *targetip, uint16_t port) {
   socklen_t addrl;
   int socktype;
 
-
   if (inet_pton(AF_INET, targetip, &serv_addr.sin_addr)) {
     addrp = (struct sockaddr*)&serv_addr;
     addrl = sizeof(serv_addr);
@@ -171,7 +173,21 @@ void hmc_net_connect(int32_t *fd, const char *targetip, uint16_t port) {
     addrl = sizeof(serv_addr6);
     socktype = AF_INET6;
   } else {
-    ENEG(-1, "Address %s invalid!\n", targetip);
+    struct addrinfo hints = {0};
+    hints.ai_flags = AI_ALL;
+    struct addrinfo *peer; // TODO: Get better messages out of clankka getaddrinfo
+    ENEZ(getaddrinfo(targetip, 0, &hints, &peer), "Could not resolve domain name %s!", targetip); 
+    ENEZ(getnameinfo(peer->ai_addr, peer->ai_addrlen, newip, sizeof(newip), 0, 0, NI_NUMERICHOST), "Could not get name info for domain %s!", targetip);
+    if (inet_pton(AF_INET, newip, &serv_addr.sin_addr)) {
+      addrp = (struct sockaddr*)&serv_addr;
+      addrl = sizeof(serv_addr);
+      socktype = AF_INET;
+    } else if (inet_pton(AF_INET6, newip, &serv_addr6.sin6_addr)) {
+      addrp = (struct sockaddr*)&serv_addr6;
+      addrl = sizeof(serv_addr6);
+      socktype = AF_INET6;
+    } else { ENEG(-1, "Domain name %s resolved to %s could not be translated into a valid ip address!", targetip, newip); }
+    targetip = newip;
   }
 
   ENEG((*fd = socket(socktype, SOCK_STREAM, 0)), "Could not create connecting socket! %m");
