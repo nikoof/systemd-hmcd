@@ -49,7 +49,7 @@ typedef struct {
   size_t total_bytes;
 } Hmc_Data_Client;
 
-void hmc_print_file_size(FILE *stream, const char* fmt, size_t file_size) {
+void hmc_print_file_size(Nob_String_Builder *sb, const char* fmt, size_t file_size) {
   // 1 PiB shouldn't fit into a uint64 but alas
   const char *units[] = { "B", "KiB", "MiB", "GiB", "TiB", "EiB", "PiB" };
 
@@ -60,7 +60,7 @@ void hmc_print_file_size(FILE *stream, const char* fmt, size_t file_size) {
     index += 1;
   }
 
-  fprintf(stream, fmt, display_size, units[index]);
+  nob_sb_appendf(sb, fmt, display_size, units[index]);
 }
 
 void hmc_print_progress_bar(FILE *stream, size_t current, size_t total) {
@@ -73,16 +73,19 @@ void hmc_print_progress_bar(FILE *stream, size_t current, size_t total) {
   size_t width = min(w.ws_col - strlen(" | [] 1024.69/1024.69 MiB (100%)"), 60);
   size_t donec = width * current / total;
 
-  fprintf(stream, "\r\033[2K\033[38;5;2m %c ", loading_indicator[donec % strlen(loading_indicator)]);
-  fprintf(stream, "\033[0m[\033[38;5;6m");
-  for (size_t i = 0;         i < donec; ++i) { fputc('#', stream); }
-  fputc(donec != width ? '>' : '#', stream);
-  for (size_t i = donec + 1; i < width; ++i) { fputc('-', stream); }
-  fprintf(stream, "\033[0m] ");
-  hmc_print_file_size(stream, "%.02f", current);
-  fputc('/', stream);
-  hmc_print_file_size(stream, "%.02f %s", total);
-  fprintf(stream, " (%3u%%)", (uint32_t)(proc * 100));
+  Nob_String_Builder sb;
+  nob_sb_appendf(&sb, "\033[2K\033[38;5;2m %c ", loading_indicator[donec % strlen(loading_indicator)]);
+  nob_sb_appendf(&sb, "\033[0m[\033[38;5;6m");
+  for (size_t i = 0;         i < donec; ++i) { nob_da_append(&sb, '#'); }
+  nob_da_append(&sb, donec != width ? '>' : '#');
+  for (size_t i = donec + 1; i < width; ++i) { nob_da_append(&sb, '-'); }
+  nob_sb_appendf(&sb, "\033[0m] ");
+  hmc_print_file_size(&sb, "%.02f", current);
+  nob_da_append(&sb, '/');
+  hmc_print_file_size(&sb, "%.02f %s", total);
+  nob_sb_appendf(&sb, "(%3u%%)\r", (uint32_t)(proc * 100));
+  nob_da_append(&sb, '\0');
+  fputs(sb.items, stream);
   fflush(stream);
 }
 
