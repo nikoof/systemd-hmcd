@@ -152,7 +152,6 @@ void hmc_init(Hmc_Context *ctx) {
 }
 
 void hmc_net_connect(int32_t *fd, char *targetip, uint16_t port) { // TODO: Change name targetip
-  /// TODO: Support ipv6
   char newip[100];
   struct sockaddr_in6 serv_addr6;
   serv_addr6.sin6_family = AF_INET6;
