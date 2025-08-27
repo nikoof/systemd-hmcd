@@ -298,11 +298,13 @@ void hmc_run_client(Hmc_Context ctx, char **input, char **recipient, char **sign
     GERR(gpgme_get_key(ctx.gpgme_ctx, *sign, &signing_key[0], 0), "Failed to get key with fingerprint %s", *recipient);
 
     gpgme_signers_clear(ctx.gpgme_ctx);
-    nob_log(NOB_INFO, "Key can sign (%d)", signing_key[0]->can_sign);
     GERR(gpgme_signers_add(ctx.gpgme_ctx, signing_key[0]), "Failed to add signing key %s", *sign);
+
+    GERR(gpgme_op_encrypt_sign(ctx.gpgme_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
+  } else {
+    GERR(gpgme_op_encrypt(ctx.gpgme_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
   }
 
-  GERR(gpgme_op_encrypt_sign(ctx.gpgme_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
 
   hmc_print_progress_bar(stderr, dh.total_bytes, dh.total_bytes);
 
