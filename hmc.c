@@ -72,7 +72,9 @@ void hmc_print_progress_bar(FILE *stream, size_t current, size_t total) {
   struct winsize w;
   ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
 
-  if (total == 0) { total = current = 0 ? 1 : current; }
+  // Look at what this bih (@gitRaiku) wrote
+  // if (total == 0) { total = current = 0 ? 1 : current; }
+  if (total == 0) { total = (current == 0) ? (current = 1) : current; }
   float proc = (float)current / (float)total;
   size_t width = min(w.ws_col - strlen(" | [] 1024.69/1024.69 MiB (100%)"), 60);
   size_t donec = width * current / total;
@@ -272,7 +274,7 @@ void hmc_init(Hmc_Context *ctx) {
 }
 
 
-void hmc_run_client(Hmc_Context ctx, char **input, char **recipient, char **targetip, uint64_t *port) {
+void hmc_run_client(Hmc_Context ctx, char **input, char **recipient, char **sign, char **targetip, uint64_t *port) {
   Hmc_Data_Client dh = {0};
 
   if (*input == NULL) {
@@ -290,7 +292,17 @@ void hmc_run_client(Hmc_Context ctx, char **input, char **recipient, char **targ
 
   gpgme_key_t recp_key[2] = {0};
   GERR(gpgme_get_key(ctx.gpgme_ctx, *recipient, &recp_key[0], 0), "Failed to get key with fingerprint %s", *recipient);
-  GERR(gpgme_op_encrypt(ctx.gpgme_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
+
+  if (*sign != NULL) {
+    gpgme_key_t signing_key[2] = {0};
+    GERR(gpgme_get_key(ctx.gpgme_ctx, *sign, &signing_key[0], 0), "Failed to get key with fingerprint %s", *recipient);
+
+    gpgme_signers_clear(ctx.gpgme_ctx);
+    nob_log(NOB_INFO, "Key can sign (%d)", signing_key[0]->can_sign);
+    GERR(gpgme_signers_add(ctx.gpgme_ctx, signing_key[0]), "Failed to add signing key %s", *sign);
+  }
+
+  GERR(gpgme_op_encrypt_sign(ctx.gpgme_ctx, recp_key, GPGME_ENCRYPT_ALWAYS_TRUST, data_in, data_out), "Failed to encrypt data");
 
   hmc_print_progress_bar(stderr, dh.total_bytes, dh.total_bytes);
 
@@ -313,7 +325,29 @@ void hmc_run_server(Hmc_Context ctx, char **output, uint64_t *port, uint8_t ipv6
   GERR(gpgme_data_new_from_cbs(&data_in, &SERVER_CBS, &dh), "Failed to create GPGME data object");
   GERR(gpgme_data_new_from_cbs(&data_out, &SERVER_CBS, &dh), "Failed to create GPGME data object");
 
-  GERR(gpgme_op_decrypt(ctx.gpgme_ctx, data_in, data_out), "Failed to decrypt data");
+  GERR(gpgme_op_decrypt_verify(ctx.gpgme_ctx, data_in, data_out), "Failed to decrypt data");
+  gpgme_verify_result_t verify_result = gpgme_op_verify_result(ctx.gpgme_ctx);
+  gpgme_signature_t sig = verify_result->signatures;
+  while (sig != NULL) {
+    gpgme_sigsum_t sum = sig->summary;
+
+    // TODO: figure out how to interpret these summary flags
+    nob_log(NOB_INFO, "%s:", sig->fpr);
+    if (sum & GPGME_SIGSUM_VALID)         nob_log(NOB_INFO, "    The signature is fully valid.");
+    if (sum & GPGME_SIGSUM_GREEN)         nob_log(NOB_INFO, "    The signature is good.");
+    if (sum & GPGME_SIGSUM_RED)           nob_log(NOB_INFO, "    The signature is bad.");
+    if (sum & GPGME_SIGSUM_KEY_REVOKED)   nob_log(NOB_INFO, "    One key has been revoked.");
+    if (sum & GPGME_SIGSUM_KEY_EXPIRED)   nob_log(NOB_INFO, "    One key has expired.");
+    if (sum & GPGME_SIGSUM_SIG_EXPIRED)   nob_log(NOB_INFO, "    The signature has expired.");
+    if (sum & GPGME_SIGSUM_KEY_MISSING)   nob_log(NOB_INFO, "    Can't verify: key missing.");
+    if (sum & GPGME_SIGSUM_CRL_MISSING)   nob_log(NOB_INFO, "    CRL not available.");
+    if (sum & GPGME_SIGSUM_CRL_TOO_OLD)   nob_log(NOB_INFO, "    Available CRL is too old.");
+    if (sum & GPGME_SIGSUM_BAD_POLICY)    nob_log(NOB_INFO, "    A policy was not met.");
+    if (sum & GPGME_SIGSUM_SYS_ERROR)     nob_log(NOB_INFO, "    A system error occurred.");
+    if (sum & GPGME_SIGSUM_TOFU_CONFLICT) nob_log(NOB_INFO, "    Tofu conflict detected.");
+    sig = sig->next;
+  }
+
 
   hmc_print_progress_bar(stderr, dh.total_bytes, dh.total_bytes);
 }
@@ -332,6 +366,7 @@ int main(int argc, char **argv) {
   char **output    = flag_str   ("output",    NULL,  "Output file. If unspecified, print to stdout.");
   char **targetip  = flag_str   ("targetip",  NULL,  "Peer ip to connect to.");
   char **recipient = flag_str   ("recipient", NULL,  "GPG fingerprint of recipient key.");
+  char **sign      = flag_str   ("sign",      NULL,  "Optional GPG fingerprint of signing key. If unspecified, no signatures are made.");
   uint64_t *port   = flag_uint64("port",      6969,  "Port to listen on.");
 
 
@@ -368,7 +403,7 @@ int main(int argc, char **argv) {
       fusage(stderr, argv[0]); exit(EXIT_FAILURE);
     }
 
-    hmc_run_client(ctx, input, recipient, targetip, port);
+    hmc_run_client(ctx, input, recipient, sign, targetip, port);
   }
 
   printf("\n");
