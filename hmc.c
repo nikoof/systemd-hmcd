@@ -104,11 +104,11 @@ ssize_t hmc_crypt_write_file(void *handle, const void *buffer, size_t size) {
   off_t offset = 0;
 
   static union file_size {
-    uint32_t sz;
-    uint8_t szes[4];
+    uint64_t sz;
+    uint8_t szes[8];
   } file_size;
 
-  while (e->received_bytes < 4 && size > 0) {
+  while (e->received_bytes < 8 && size > 0) {
     file_size.szes[e->received_bytes++] = ((char*)buffer)[offset++];
     size -= 1;
 
@@ -116,8 +116,8 @@ ssize_t hmc_crypt_write_file(void *handle, const void *buffer, size_t size) {
       return offset;
     }
 
-    if (e->received_bytes == 4) {
-      e->total_bytes = ntohl(file_size.sz);
+    if (e->received_bytes == 8) {
+      e->total_bytes = file_size.sz;
 
       hmc_print_progress_bar(stderr, e->received_bytes, e->total_bytes);
       ssize_t writel = write(e->file_fd, buffer + offset, size);
@@ -135,13 +135,13 @@ ssize_t hmc_crypt_read_file(void *handle, void *buffer, size_t size) {
   off_t offset = 0;
 
   union file_size {
-    uint32_t sz;
-    uint8_t szes[4];
+    uint64_t sz;
+    uint8_t szes[8];
   } file_size;
-  file_size.sz = htonl(e->total_bytes);
+  file_size.sz = e->total_bytes;
 
 
-  while (e->sent_bytes < 4 && size > 0) {
+  while (e->sent_bytes < 8 && size > 0) {
     ((char*)buffer)[offset++] = file_size.szes[e->sent_bytes++];
     size -= 1;
 
@@ -149,7 +149,7 @@ ssize_t hmc_crypt_read_file(void *handle, void *buffer, size_t size) {
       return offset;
     }
 
-    if (e->sent_bytes == 4) {
+    if (e->sent_bytes == 8) {
       hmc_print_progress_bar(stderr, e->sent_bytes, e->total_bytes);
       ssize_t readl = read(e->file_fd, buffer + offset, size);
       return (readl == -1) ? -1 : offset + readl;
