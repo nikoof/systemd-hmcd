@@ -41,9 +41,9 @@ int main(int argc, char **argv) {
   if (*debug) nob_cmd_append(&cmd, "-Og", "-ggdb3");
   else        nob_cmd_append(&cmd, "-O2");
 
-  nob_cmd_append(&cmd, "-lgpgme");
   nob_cmd_append(&cmd, "-o", BUILD_DIR OUT_NAME);
   nob_cmd_append(&cmd, "hmc.c");
+  nob_cmd_append(&cmd, "-lgpgme");
 
   if (!nob_cmd_run(&cmd)) return 1;
 
