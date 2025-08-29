@@ -354,8 +354,8 @@ void hmc_run_server(Hmc_Context ctx, char **output, uint64_t *port, uint8_t ipv6
   hmc_print_progress_bar(stderr, dh.total_bytes, dh.total_bytes);
 }
 
-void fusage(FILE *stream, const char *progname) {
-  fprintf(stream, "usage: %s [OPTIONS]\n", progname);
+void fusage(FILE *stream) {
+  fprintf(stream, "usage: %s [OPTIONS]\n", flag_program_name());
   fprintf(stream, "OPTIONS:\n");
   flag_print_options(stream);
 }
@@ -373,18 +373,18 @@ int main(int argc, char **argv) {
 
 
   if (!flag_parse(argc, argv)) {
-    fusage(stderr, argv[0]);
+    fusage(stderr);
     flag_print_error(stderr);
     exit(EXIT_FAILURE);
   }
 
   if (*help) {
-    fusage(stdout, argv[0]);
+    fusage(stdout);
     exit(EXIT_SUCCESS);
   }
 
   if (!(*recipient) && !(*listen)) {
-    fusage(stderr, argv[0]);
+    fusage(stderr);
     nob_log(NOB_ERROR, "Missing required parameter `-recipient`");
     exit(EXIT_FAILURE);
   }
@@ -397,12 +397,12 @@ int main(int argc, char **argv) {
   } else {
     if (*recipient == NULL || **recipient == '\0') {
       nob_log(NOB_ERROR, "Cannot connect to remote if encryption recipient is unknown!");
-      fusage(stderr, argv[0]); exit(EXIT_FAILURE);
+      fusage(stderr); exit(EXIT_FAILURE);
     }
 
     if (*targetip == NULL || **targetip == '\0') {
       nob_log(NOB_ERROR, "Cannot connect to remote if target ip is unknown!");
-      fusage(stderr, argv[0]); exit(EXIT_FAILURE);
+      fusage(stderr); exit(EXIT_FAILURE);
     }
 
     hmc_run_client(ctx, input, recipient, sign, targetip, port);
